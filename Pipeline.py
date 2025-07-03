@@ -8,9 +8,63 @@ import joblib
 import numpy as np
 from sklearn.ensemble import RandomForestClassifier
 import os
+import plotly.graph_objects as go
 import matplotlib.pyplot as plt
+import seaborn as sns
 from datetime import datetime
 import sys
+import logging  # Gestión de alertas, warnings de la pipeline (corregido)
+from pathlib import Path
+
+def setup_pipeline_logging():
+    """
+    Configura el sistema de logging específico para la pipeline
+    """
+    # Crear directorio de logs
+    log_dir = Path('/opt/covid/logs_Estratificacion')
+    log_dir.mkdir(exist_ok=True)
+    
+    # Configurar formato
+    formatter = logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s'
+    )
+    
+    # Logger principal de la pipeline
+    logger = logging.getLogger('covid_pipeline')
+    logger.setLevel(logging.DEBUG)
+    
+    # Limpiar handlers existentes
+    logger.handlers.clear()
+    
+    # Handler para consola
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.INFO)
+    console_handler.setFormatter(formatter)
+    
+    # Handler para archivo general
+    file_handler = logging.FileHandler(log_dir / 'pipeline.log', encoding='utf-8')
+    file_handler.setLevel(logging.DEBUG)
+    file_handler.setFormatter(formatter)
+    
+    # Handler específico para errores
+    error_handler = logging.FileHandler(log_dir / 'pipeline_errors.log', encoding='utf-8')
+    error_handler.setLevel(logging.ERROR)
+    error_handler.setFormatter(formatter)
+    
+    # Handler específico para warnings
+    warning_handler = logging.FileHandler(log_dir / 'pipeline_warnings.log', encoding='utf-8')
+    warning_handler.setLevel(logging.WARNING)
+    warning_handler.setFormatter(formatter)
+    
+    # Añadir handlers
+    logger.addHandler(console_handler)
+    logger.addHandler(file_handler)
+    logger.addHandler(error_handler)
+    logger.addHandler(warning_handler)
+    
+    return logger
+
+pipeline_logger = setup_pipeline_logging()
 
 @step(enable_cache=False)
 def data_loader() -> pd.DataFrame:
@@ -18,7 +72,7 @@ def data_loader() -> pd.DataFrame:
     ruta_fichero = '/opt/covid/Pacientes_Estratificacion.txt'
     archivo_control = '/opt/covid/Ultima_Modificacion_Estratificacion.txt'
     modificado = 1
-    
+    # Obtener fecha de última modificación del fichero
     fecha_modificacion = datetime.fromtimestamp(os.path.getmtime(ruta_fichero)).date()
 
     if os.path.exists(archivo_control):
@@ -27,12 +81,12 @@ def data_loader() -> pd.DataFrame:
             try:
                 fecha_guardada = datetime.fromisoformat(linea).date()
                 if fecha_modificacion > fecha_guardada:
-                    print("El archivo ha sido modificado desde la última revisión.")
+                    pipeline_logger.info("El archivo ha sido modificado desde la última revisión.")
                 else:
-                    print("El archivo no ha sido modificado desde la última revisión.")
+                    pipeline_logger.info("El archivo no ha sido modificado desde la última revisión.")
                     modificado = 0
             except ValueError:
-                print("Formato incorrecto en el archivo de control. Se sobrescribirá.")
+                pipeline_logger.error("Formato incorrecto en el archivo de control. Se sobrescribirá.")
                
 
     with open(archivo_control, 'w') as f:
@@ -75,6 +129,87 @@ def data_preprocessing(estratificacion: pd.DataFrame) -> Tuple[pd.DataFrame, pd.
     return estratificacion_model, estratificacion_copia
 
 @step(enable_cache=False)
+def determinarCalidadIPIP(data: pd.DataFrame):
+        def prediccion(ensemble, X):
+            """
+            Predice usando un ensemble (lista de modelos).
+            Se calcula el promedio de predicciones de cada modelo.
+            """
+            preds = [model.predict(X) for model in ensemble]  # lista de arrays
+            preds = np.array(preds)  # shape: (n_models, n_samples)
+            avg_pred = np.round(np.mean(preds, axis=0)).astype(int)
+            return avg_pred
+
+        def prediccion_final(ipip, X):
+            """
+            ipip: lista de ensembles (lista de listas de modelos)
+            Para cada ensemble se calcula su predicción.
+            Luego se promedian las predicciones de todos los ensembles.
+            """
+            all_preds = []
+            for ensemble in ipip:
+                pred_ensemble = prediccion(ensemble, X)
+                all_preds.append(pred_ensemble)
+            all_preds = np.array(all_preds)  # shape: (n_ensembles, n_samples)
+            final_pred = np.round(np.mean(all_preds, axis=0)).astype(int)
+            return final_pred
+        
+        def prediccion_final_prob(ipip, X):
+            """
+            Similar a prediccion_final, pero usando probabilidades (predict_proba)
+            para cada modelo y promediando.
+            """
+            all_probs = []
+            for ensemble in ipip:
+                probs_ensemble = [model.predict_proba(X)[:,1] for model in ensemble] 
+                probs_ensemble = np.array(probs_ensemble)
+                avg_prob_ensemble = np.mean(probs_ensemble, axis=0)
+                all_probs.append(avg_prob_ensemble)
+            all_probs = np.array(all_probs)
+            final_prob = np.mean(all_probs, axis=0)
+            return final_prob
+
+        
+        modelos = []
+        chunks = dict(tuple(data.groupby('mes')))
+        predictions = []
+        probs = []
+        chunk_labels  = []
+        real = []
+        for t in range(1,11):
+            modelo = joblib.load(f"/opt/covid/resultados_Estratificacion/modelos/IPIP_NSCD.chunk{t}.pmin.0.55.pkl")
+            modelos.append(modelo)
+            next_chunk = chunks[t].drop(columns=['mes'])
+            y_chunk = next_chunk['SITUACION'].map({'CURADO': 1, 'FALLECIDO': 0})
+            X_chunk = next_chunk.drop(columns=["SITUACION"])
+           
+            results_class = prediccion_final(modelos[t-1], X_chunk)
+            results_prob = prediccion_final_prob(modelos[t-1], X_chunk)
+            predictions.extend(results_class.tolist())
+            probs.extend(results_prob.tolist())
+            chunk_labels.extend([t] * len(next_chunk))
+            real.extend(y_chunk.tolist())
+            
+        df = pd.DataFrame({
+            'real': real,
+            'predicciones': predictions,
+            'probabilidades': probs, 
+            'chunk': chunk_labels
+        })
+        metricas_por_chunk = df.groupby("chunk").apply(
+        lambda g: pd.Series({
+            'balanced_accuracy': balanced_accuracy_score(g['real'], g['predicciones'])
+        })
+        )
+        
+        balanced_acc_previo_a_train = metricas_por_chunk['balanced_accuracy'].mean()
+        if (balanced_acc_previo_a_train >= 0.9): 
+            mensaje = f"Balanced accuracy por encima del Umbral: {balanced_acc_previo_a_train:.4f}. No se entrenara."
+            print(f"Balanced accuracy por encima del Umbral: {balanced_acc_previo_a_train:.4f}. No se entrenara.")
+            pipeline_logger.info(mensaje)
+            sys.exit(0) 
+
+@step(enable_cache=False)
 def trainer(data: pd.DataFrame, estratificacion_copia: pd.DataFrame) -> Tuple[
     Annotated[pd.DataFrame, "final_df"], 
     Annotated[List[str], "models_names"], 
@@ -82,21 +217,13 @@ def trainer(data: pd.DataFrame, estratificacion_copia: pd.DataFrame) -> Tuple[
     Annotated[pd.DataFrame, "df_10"]
 ]:
     def prediccion(ensemble, X):
-        """
-        Predice usando un ensemble (lista de modelos).
-        Se calcula el promedio de predicciones de cada modelo.
-        """
-        preds = [model.predict(X) for model in ensemble]  
+        preds = [model.predict(X) for model in ensemble] 
         preds = np.array(preds) 
         avg_pred = np.round(np.mean(preds, axis=0)).astype(int)
         return avg_pred
 
     def prediccion_final(ipip, X):
-        """
-        ipip: lista de ensembles (lista de listas de modelos)
-        Para cada ensemble se calcula su predicción.
-        Luego se promedian las predicciones de todos los ensembles.
-        """
+  
         all_preds = []
         for ensemble in ipip:
             pred_ensemble = prediccion(ensemble, X)
@@ -106,13 +233,10 @@ def trainer(data: pd.DataFrame, estratificacion_copia: pd.DataFrame) -> Tuple[
         return final_pred
 
     def prediccion_final_prob(ipip, X):
-        """
-        Similar a prediccion_final, pero usando probabilidades (predict_proba)
-        para cada modelo y promediando.
-        """
+    
         all_probs = []
         for ensemble in ipip:
-            probs_ensemble = [model.predict_proba(X)[:,1] for model in ensemble]  
+            probs_ensemble = [model.predict_proba(X)[:,1] for model in ensemble] 
             probs_ensemble = np.array(probs_ensemble)
             avg_prob_ensemble = np.mean(probs_ensemble, axis=0)
             all_probs.append(avg_prob_ensemble)
@@ -121,7 +245,7 @@ def trainer(data: pd.DataFrame, estratificacion_copia: pd.DataFrame) -> Tuple[
         return final_prob
 
     def mt(length):
-        return 10  
+        return 10 
 
     def best_models(model, metric_max, metrics, x, y, p):
         model_performance = []
@@ -232,7 +356,7 @@ def trainer(data: pd.DataFrame, estratificacion_copia: pd.DataFrame) -> Tuple[
         
         modelos_previos = []
         for number in range(1, max_chunk):
-            modelos_previos.extend(f"/opt/covid/resultados_Estratificacion/modelos/IPIP_NSCD.chunk{number}.pmin.0.55.pkl")
+            modelos_previos.append(joblib.load(f"/opt/covid/resultados_Estratificacion/modelos/IPIP_NSCD.chunk{number}.pmin.0.55.pkl"))
             
         next_chunk = chunks[t + 1].drop(columns=['mes'])
         next_chunk['SITUACION'] = next_chunk['SITUACION'].map({'CURADO': 1, 'FALLECIDO': 0})
@@ -240,7 +364,7 @@ def trainer(data: pd.DataFrame, estratificacion_copia: pd.DataFrame) -> Tuple[
         y_next = next_chunk['SITUACION']
         
         results_class = prediccion_final(ipip, X_next)
-        results_class_previos = prediccion_final(modelos_previos[t], X_next)
+        results_class_previos = prediccion_final(modelos_previos[t-1], X_next)
         results_prob = prediccion_final_prob(ipip, X_next)
         
         for id_paciente, prediccion_class in zip(X_next["ID_PACIENTE"], results_class):
@@ -250,7 +374,7 @@ def trainer(data: pd.DataFrame, estratificacion_copia: pd.DataFrame) -> Tuple[
         df_filtrado = estratificacion_copia[estratificacion_copia['ID_PACIENTE'].isin(idPaciente_prediccion.keys())]
 
  
-        df_10 = df_filtrado.sample (10).copy()
+        df_10 = df_filtrado.sample(10).copy()
 
    
         df_10['prediccion'] = df_10['ID_PACIENTE'].map(idPaciente_prediccion)
@@ -280,76 +404,115 @@ def trainer(data: pd.DataFrame, estratificacion_copia: pd.DataFrame) -> Tuple[
     return final_df, models_names, models, df_10
 
 @step(enable_cache=False)
-def evaluacion(final_df: pd.DataFrame) -> float:
+def evaluacion(final_df: pd.DataFrame) -> Tuple[float,float]:
     y_true = final_df['real']
     y_pred = final_df['pred']
-    y_prob = final_df['pred_prob']
-    y_pred_previos = []
-    if 'pred_previos' in final_df.columns:
-        y_pred_previos = final_df['pred_previos']
-     
+
     
-    accuracy = accuracy_score(y_true, y_pred)
-    precision = precision_score(y_true, y_pred)
-    recall = recall_score(y_true, y_pred)
-    f1 = f1_score(y_true, y_pred)
-    balanced_acc = balanced_accuracy_score(y_true, y_pred)
-    if y_pred_previos:
-        balanced_acc_previo = balanced_accuracy_score(y_true, y_pred_previos)
-    else: 
-        balanced_acc_previo = 0.0
-
-
+    chunk_metrics = final_df.groupby("chunk").apply(
+    lambda g: pd.Series({
+        'balanced_accuracy': balanced_accuracy_score(g['real'], g['pred'])
+    })
+    )
+    
+    balanced_acc = chunk_metrics['balanced_accuracy'].mean()
+    
+    chunk_metrics_previos = final_df.groupby("chunk").apply(
+    lambda g: pd.Series({
+        'balanced_accuracy_previo': balanced_accuracy_score(g['real'], g['pred_previos'])
+    })
+    )
+    balanced_acc_previo = chunk_metrics_previos['balanced_accuracy_previo'].mean()
+ 
+    # Guardar en archivo
     with open("/opt/covid/resultados_Estratificacion/modelos/metricas_totales.txt", "w") as f:
-        f.write(f"Accuracy: {accuracy:.4f}\n")
-        f.write(f"Precision: {precision:.4f}\n")
-        f.write(f"Recall: {recall:.4f}\n")
-        f.write(f"F1 Score: {f1:.4f}\n")
-        f.write(f"Balanced Accuracy: {balanced_acc:.4f}\n")
+        f.write(f"Balanced Accuracy Promedio de los Chunks: {balanced_acc:.4f}\n")
         f.write("Primeros 5 valores reales\n")
         f.write(y_true.head().to_string())
         f.write("\n")
         f.write("Primeros 5 valores predichos\n")
         f.write(y_pred.head().to_string())
 
-
-    chunk_metrics = final_df.groupby("chunk").apply(
-        lambda g: pd.Series({
-            'accuracy': accuracy_score(g['real'], g['pred']),
-            'precision': precision_score(g['real'], g['pred']),
-            'recall': recall_score(g['real'], g['pred']),
-            'f1': f1_score(g['real'], g['pred']),
-            'balanced_accuracy': balanced_accuracy_score(g['real'], g['pred'])
+    # Analizar métricas por chunk
+    chunk_metrics = []
+    for chunk, g in final_df.groupby("chunk"):
+        y_true_chunk = g['real'].values
+        y_pred_chunk = g['pred'].values
         
+        # Calcular métrica puntual
+        bal_acc = balanced_accuracy_score(y_true_chunk, y_pred_chunk)
+        
+        # Bootstrapping para intervalo de confianza
+        n_bootstrap = 1000
+        rng = np.random.RandomState(1234)
+        bal_acc_samples = []
+        for _ in range(n_bootstrap):
+            indices = rng.choice(len(y_true_chunk), len(y_true_chunk), replace=True)
+            bal_acc_sample = balanced_accuracy_score(y_true_chunk[indices], y_pred_chunk[indices])
+            bal_acc_samples.append(bal_acc_sample)
+        lower = np.percentile(bal_acc_samples, 2.5)
+        upper = np.percentile(bal_acc_samples, 97.5)
+        
+        chunk_metrics.append({
+            "chunk": chunk,
+            "balanced_accuracy": bal_acc,
+            "balanced_accuracy_lower": lower,
+            "balanced_accuracy_upper": upper
         })
+
+    chunk_metrics = pd.DataFrame(chunk_metrics).set_index("chunk")
+
+    # Configuración de estilo bonito con seaborn
+    sns.set(style="whitegrid", context="talk")
+
+    fig, ax = plt.subplots(figsize=(12, 7))
+
+    # Curva principal
+    ax.plot(
+        chunk_metrics.index,
+        chunk_metrics["balanced_accuracy"],
+        label="Balanced Accuracy",
+        color="royalblue",
+        marker="o",
+        linewidth=2
     )
 
-    plt.figure(figsize=(10, 6))
-    chunk_metrics[['balanced_accuracy']].plot(marker='o')
-    plt.title("Evolución del desempeño por chunk (mes)")
-    plt.xlabel("Chunk")
-    plt.ylabel("Score")
-    plt.grid(True)
-    plt.tight_layout()
-    plt.savefig("/opt/covid/resultados_Estratificacion/metricas_por_chunk.png")  
-    plt.close() 
+    # Banda del intervalo de confianza
+    ax.fill_between(
+        chunk_metrics.index,
+        chunk_metrics["balanced_accuracy_lower"],
+        chunk_metrics["balanced_accuracy_upper"],
+        color="royalblue",
+        alpha=0.2,
+        label="IC 95%"
+    )
 
-    cm = confusion_matrix(final_df['real'], final_df['pred'])
-    disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=["FALLECIDO", "CURADO"])
+    # Títulos y etiquetas
+    ax.set_title("Evolución del desempeño por chunk (mes) con IC 95%", fontsize=18, weight="bold")
+    ax.set_xlabel("Chunk", fontsize=14)
+    ax.set_ylabel("Balanced Accuracy", fontsize=14)
 
-    
-    fig, ax = plt.subplots(figsize=(6, 6))
-    disp.plot(ax=ax, cmap="Blues", values_format="d")
-    plt.title("Matriz de Confusión - Total")
+    # Leyenda elegante
+    ax.legend(loc="upper left", fontsize=12, frameon=True)
+
+    # Opcional: rotar etiquetas del eje x si son fechas u ocupan mucho espacio
+    plt.xticks(rotation=45)
+
+    # Ajustar layout para que no se corte nada
     plt.tight_layout()
-    plt.savefig("/opt/covid/resultados_Estratificacion/matriz_confusion_total.png")
-    plt.close()
+
+    # Guardar como imagen
+    plt.savefig("/opt/covid/resultados_Estratificacion/metricas_por_chunk.png", dpi=150)
+
+
     return balanced_acc, balanced_acc_previo
 
 @step(enable_cache=False)
-def save_model(balanced_accuracy: float, balanced_accuracy_previo: float, models_names: List[str], models: List[List[RandomForestClassifier]], df_10: pd.DataFrame ): 
+def save_model(balanced_accuracy: float, balanced_accuracy_previo:float, models_names: List[str], models: List[List[RandomForestClassifier]], df_10: pd.DataFrame ): 
              if(balanced_accuracy < 0.9 or balanced_accuracy < balanced_accuracy_previo):
-                print("La lista de ensembles no supera el Threshold u obtienen un peor rendimiento que los modelos previos, por lo que no guardaremos el modelo")
+                 error_msg = f"Balanced accuracy demasiado bajo: {balanced_accuracy:.4f}. No se guardarán los modelos."
+                 pipeline_logger.error(error_msg, exc_info=True)
+                 raise ValueError(error_msg)
              else: 
                  for i in range(len(models_names)):
                     joblib.dump(models[i], models_names[i]) 
@@ -361,6 +524,7 @@ def save_model(balanced_accuracy: float, balanced_accuracy_previo: float, models
 def pipeline():
     df = data_loader()
     estratificacion_model, estratificacion_copia = data_preprocessing(df)
+    determinarCalidadIPIP(estratificacion_model)
     final_df, models_names, models, df_10 = trainer(estratificacion_model, estratificacion_copia)
     balanced_accuracy, balanced_accuracy_previo = evaluacion(final_df)
     save_model(balanced_accuracy, balanced_accuracy_previo, models_names, models, df_10)
