@@ -47,7 +47,7 @@ Guardar métricas y gráficos como evidencias de monitoreo.
 Compara el rendimiento del modelo actual con el modelo previo. Solo guardar los nuevos modelos si el rendimiento supera un umbral (balanced accuracy ≥0.9) y es mejor que el modelo anterior. También guarda ejemplos de predicciones para auditoría.
 
 # Concept Drift
-La segmentación temporal en chunks permite detectar y responder rápidamente a cambios en el comportamiento de los datos. La evaluación del rendimiento en cada chunk nuevo compara modelos pasados y actuales, lo que funciona como un test de drift supervisado. La pipeline evita sobreescribir modelos cuando el nuevo modelo no mejora (previniendo degradaciones debido a drift temporal o ruido).
+Nuestro enfoque se basa en una segmentación temporal de los datos en chunks, lo que permite detectar y responder rápidamente a cambios en el comportamiento. Para cada nuevo chunk, evaluamos el rendimiento comparando el modelo actual con los modelos anteriores, funcionando como un test de drift supervisado. La pipeline está diseñada para evitar la sobreescritura del modelo si el nuevo no muestra una mejora significativa, previniendo así degradaciones por drift temporal o ruido. Además, utilizamos la metodología IPIP para el entrenamiento, lo que nos permite manejar de manera más efectiva conjuntos de datos desbalanceados.
 
 # IPIP 
 Utilización de la técnica IPIP, la cual es una estrategia que combina bagging, ensembles y balanceo iterativo para mejorar la predicción en problemas con clases desbalanceadas y series temporales, evaluando chunk a chunk para detectar y adaptarse a posibles cambios en la distribución de los datos (concept drift)
