@@ -11,25 +11,25 @@ Pipeline MLOPS desarrollada con ZenML la cual implementa un sistema de entrenami
 3. Automatización con CRON: Ejecutar la pipeline automáticamente mediante CRONTAB lo que garantiza un sistema continuo de aprendizaje y actualización automática.
 
 # Flujo de Trabajo 
-1. data_loader
+1. Ingesta de Datos 
 
 
 Carga los datos y comprueba la fecha de última modificación del archivo; si no hubo cambios desde la última ejecución (usando un archivo de control), termina el pipeline sin continuar, optimizando recursos y finalmente se devuelve el dataframe si detecta cambios (potencial concept drift).
 
 
-2. data_preprocessing
+2. Preprocesamiento de datos
 
 
 Limpia los datos eliminando nulos en columnas clave. Genera variables binarias (e.g., OBESITY, ASTHMA) a partir del texto de ETIQUETA. Procesar la fecha de diagnóstico para extraer el mes (columna mes), lo que permite segmentar los datos en chunks mensuales. Convertir variables categóricas como INGRESO y SEXO en formato numérico.
 
 
-3. trainer
+3. Entrenamiento
 
 
 Divide los datos por chunks (meses) y usa los chunks como mini-datasets independientes. Para cada chunk, genera múltiples bootstraps balanceando las clases (estrategia IPIP: Iterative Proportional Importance Pruning). Cada bootstrap entrena un ensemble de Random Forests con selección iterativa de modelos: solo se mantienen modelos que mejoran el desempeño del ensemble sobre un conjunto de validación. Generar predicciones sobre el chunk siguiente, simulando predicción en datos futuros. Guardar resultados y comparativas de métricas con modelos anteriores.
 
 
-4. evaluacion
+4. Validación
 
 
 Calcula métricas globales y por chunk: accuracy, precision, recall, f1 y balanced accuracy.
@@ -41,7 +41,7 @@ Genera gráficos de evolución temporal del balanced accuracy y matriz de confus
 Guardar métricas y gráficos como evidencias de monitoreo.
 
 
-5. save_model
+5. Desplegar Modelos
 
 
 Compara el rendimiento del modelo actual con el modelo previo. Solo guardar los nuevos modelos si el rendimiento supera un umbral (balanced accuracy ≥0.9) y es mejor que el modelo anterior. También guarda ejemplos de predicciones para auditoría.
