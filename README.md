@@ -1,100 +1,101 @@
 # 🦠 COVID-19 Predictive Pipeline with Concept Drift Adaptation
 
-Pipeline MLOps desarrollada con **ZenML** para entrenar y actualizar de forma continua un modelo predictivo sobre datos de pacientes con COVID. El objetivo es detectar y adaptarse automáticamente al **concept drift** en los datos de estratificación ofrecidos por el SMS, asegurando mantener modelos actualizados con excelente rendimiento en funcionamiento; además de notificando correctamente al equipo en caso de algún problema.
+An MLOps pipeline developed with **ZenML** to continuously train and update a predictive model on COVID patient data. The goal is to automatically detect and adapt to **concept drift** in the stratification data provided by the SMS, ensuring that deployed models remain up-to-date with excellent performance while properly notifying the team in case of any issues.
 
 ---
 
-## 📌 Introducción
+## 📌 Introduction
 
-El **concept drift** se refiere a cambios en la relación entre las variables de entrada (X) y la variable objetivo (y) a lo largo del tiempo, lo que provoca que un modelo previamente entrenado pierda precisión.
+**Concept drift** refers to changes in the relationship between input variables (X) and the target variable (y) over time, causing a previously trained model to lose accuracy.
 
-Nuestra pipeline detecta el drift de forma **implícita**, evaluando mensualmente el rendimiento sobre datos nuevos (chunks mensuales) y comparándolo con el desempeño de modelos anteriores. Si el rendimiento cae (por ejemplo, baja la balanced accuracy), la pipeline evita actualizar el modelo, asegurando que solo se reentrene cuando el nuevo modelo realmente mejora o mantiene el desempeño.
-
----
-
-## 💡 Idea Principal
-
-1. **Monitoreo de desempeño:**  
-   Evalúa el rendimiento en los chunks más recientes respecto a modelos anteriores usando métricas como *balanced accuracy*.
-
-2. **Reentrenamiento adaptativo:**  
-   Si los datos cambian, la pipeline entrena ensembles actualizados con los datos más recientes, ajustando el modelo al nuevo patrón.
-
-3. **Automatización con CRON:**  
-   La ejecución automática mediante `CRONTAB` garantiza un sistema continuo de aprendizaje y actualización.
+Our pipeline detects drift **implicitly** by evaluating performance monthly on new data (monthly chunks) and comparing it to the performance of previous models. If performance drops (e.g., balanced accuracy decreases), the pipeline avoids updating the model, ensuring retraining only occurs when the new model actually improves or maintains performance.
 
 ---
 
-## 🔄 Flujo de Trabajo
+## 💡 Main Idea
 
-### 1️⃣ Ingesta de Datos
+1. **Performance monitoring:**  
+   Evaluates performance on the most recent chunks compared to previous models using metrics like *balanced accuracy*.
 
-- Carga los datos y verifica la fecha de última modificación del archivo.
-- Si no hubo cambios desde la última ejecución (mediante un archivo de control), la pipeline termina para optimizar recursos.
-- Si se detectan cambios, devuelve el dataframe actualizado.
+2. **Adaptive retraining:**  
+   If the data distribution changes, the pipeline trains updated ensembles with the latest data, adjusting the model to new patterns.
 
-### 2️⃣ Preprocesamiento de Datos
+3. **Automation with CRON:**  
+   Automated execution with `crontab` ensures a continuous learning and updating system.
 
-- Elimina nulos en columnas clave.
-- Genera variables binarias (e.g., `OBESITY`, `ASTHMA`) a partir de la columna `ETIQUETA`.
-- Procesa la fecha de diagnóstico para extraer el mes (`mes`) y segmentar los datos en **chunks mensuales**.
-- Convierte variables categóricas como `INGRESO` y `SEXO` a formato numérico.
+---
 
-### 3️⃣ Entrenamiento
+## 🔄 Workflow
 
-- Divide los datos en chunks mensuales, funcionando como mini-datasets independientes.
-- Genera múltiples bootstraps balanceados con la estrategia **IPIP** (Iterative Proportional Importance Pruning).
-- Cada bootstrap entrena un ensemble de Random Forests, manteniendo solo los modelos que mejoran el desempeño del ensemble en un conjunto de validación.
-- Genera predicciones sobre el chunk siguiente, simulando la predicción en datos futuros.
-- Guarda resultados y comparativas de métricas con modelos previos.
+### 1️⃣ Data Ingestion
 
-### 4️⃣ Validación
+- Loads the data and checks the file’s last modification date.
+- If no changes are detected since the last run (using a control file), the pipeline exits to optimize resources.
+- If changes are detected, the updated dataframe is returned.
 
-- Calcula métricas globales y por chunk: *accuracy*, *precision*, *recall*, *f1* y *balanced accuracy*.
-- Genera gráficos de evolución temporal de la balanced accuracy y matriz de confusión acumulada.
-- Guarda métricas y gráficos como evidencias de monitoreo.
+### 2️⃣ Data Preprocessing
 
-### 5️⃣ Despliegue de Modelos
+- Removes nulls in key columns.
+- Generates binary variables (e.g., `OBESITY`, `ASTHMA`) from the `ETIQUETA` column.
+- Processes the diagnosis date to extract the month (`mes`) and segment the data into **monthly chunks**.
+- Converts categorical variables like `INGRESO` and `SEXO` to numeric format.
 
-- Compara el rendimiento del nuevo modelo con el anterior.
-- Solo guarda el nuevo modelo si:
-  - El rendimiento supera el umbral mínimo esperado-
-  - El modelo mejora o mantiene el desempeño frente al modelo previo.
-- Guarda ejemplos de predicciones para auditoría y trazabilidad.
+### 3️⃣ Training
+
+- Splits data into monthly chunks, treating them as independent mini-datasets.
+- Creates multiple balanced bootstraps using the **IPIP** (Iterative Proportional Importance Pruning) strategy.
+- Each bootstrap trains a Random Forest ensemble, retaining only models that improve the ensemble’s performance on a validation set.
+- Generates predictions on the following chunk, simulating future data predictions.
+- Saves results and metric comparisons with previous models.
+
+### 4️⃣ Validation
+
+- Calculates global and per-chunk metrics: *accuracy*, *precision*, *recall*, *f1*, and *balanced accuracy*.
+- Generates time series plots of balanced accuracy evolution and an accumulated confusion matrix.
+- Saves metrics and charts as monitoring evidence.
+
+### 5️⃣ Model Deployment
+
+- Compares the performance of the new model with the previous one.
+- Only saves the new model if:
+  - Its performance exceeds the expected minimum threshold.
+  - The model improves or maintains performance compared to the previous model.
+- Saves prediction examples for auditing and traceability.
 
 ---
 
 ## 🔍 Concept Drift
 
-El enfoque se basa en segmentar los datos en chunks mensuales para detectar y responder rápidamente a cambios en su comportamiento. Para cada nuevo chunk, se compara el rendimiento del modelo actual con modelos anteriores, funcionando como un test supervisado de drift.
+The approach relies on segmenting data into monthly chunks to quickly detect and respond to behavioral changes. For each new chunk, the performance of the current model is compared with previous models, effectively functioning as a supervised drift test.
 
-La pipeline evita sobreescribir el modelo si el nuevo no muestra una mejora significativa, previniendo degradaciones por drift temporal o ruido. La metodología **IPIP** mejora además el manejo de conjuntos de datos desbalanceados.
+The pipeline avoids overwriting the model if the new one does not show significant improvement, preventing degradation due to temporary drift or noise. The **IPIP** methodology further improves handling of imbalanced datasets.
 
 ---
 
 ## 🧩 IPIP (Iterative Proportional Importance Pruning)
 
-La técnica **IPIP** combina bagging, ensembles y balanceo iterativo para mejorar la predicción en problemas con clases desbalanceadas y series temporales. Permite:
+The **IPIP** technique combines bagging, ensembles, and iterative balancing to improve predictions on problems with class imbalance and time series. It allows:
 
-- Equilibrar clases en cada bootstrap.
-- Seleccionar modelos que realmente aportan mejoras al ensemble.
-- Adaptar el modelo dinámicamente a cambios en la distribución de los datos (concept drift).
-
----
-
-## 🚀 Automatización
-
-Integra tareas programadas con `CRONTAB` para ejecutar la pipeline periódicamente, garantizando un sistema de aprendizaje continuo y sin intervención manual.
+- Balancing classes in each bootstrap.
+- Selecting models that truly improve the ensemble.
+- Dynamically adapting the model to changes in data distribution (concept drift).
 
 ---
 
-## 🗂️ Tecnologías
+## 🚀 Automation
+
+Integrates scheduled tasks with `crontab` to periodically run the pipeline, ensuring a continuous learning system with no manual intervention required.
+
+---
+
+## 🗂️ Technologies
 
 - ZenML
 - Python 3.10  
 - Scikit-learn  
 - Pandas  
 - Matplotlib / Seaborn  
-- CRON para automatización
+- CRON for automation
 
 ---
+
