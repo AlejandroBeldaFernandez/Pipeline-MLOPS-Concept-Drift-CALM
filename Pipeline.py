@@ -15,6 +15,13 @@ import logging
 from pathlib import Path
 
 
+# Configuración de rutas
+PATH_DATA = "/path/to/data"
+PATH_MODELS = "/path/to/models"
+PATH_RESULTS = "/path/to/results"
+PATH_LOGS = "/path/to/logs"
+PATH_CONTROL = "/path/to/control"
+
 def ensemble_prediction(ensemble, X):
     """Realiza predicción usando conjunto de modelos"""
     preds = [model.predict(X) for model in ensemble] 
@@ -62,7 +69,7 @@ def select_best_models(model_list, metric_max, metrics, x, y, p):
 def setup_pipeline_logging():
     """Configura el sistema de logging para la pipeline"""
     # Crear directorio de logs
-    log_dir = Path('/path/to/logs')
+    log_dir = Path(PATH_LOGS)
     log_dir.mkdir(exist_ok=True)
     
     # Configurar formato
@@ -110,8 +117,8 @@ pipeline_logger = setup_pipeline_logging()
 @step(enable_cache=False)
 def data_loader() -> pd.DataFrame:
     """Carga datos desde archivo y verifica modificaciones"""
-    data_file = '/path/to/data/dataset.txt'
-    control_file = '/path/to/control/last_modified.txt'
+    data_file = f'{PATH_DATA}/dataset.txt'
+    control_file = f'{PATH_CONTROL}/last_modified.txt'
     is_modified = 1
     file_modified_date = datetime.fromtimestamp(os.path.getmtime(data_file)).date()
 
@@ -187,7 +194,7 @@ def evaluate_existing_models(data: pd.DataFrame):
     real = []
     
     for t in range(1, 11):
-        model = joblib.load(f"/path/to/models/model.chunk{t}.threshold.0.55.pkl")
+        model = joblib.load(f"{PATH_MODELS}/model.chunk{t}.threshold.0.55.pkl")
         models.append(model)
         next_chunk = chunks[t].drop(columns=['time_period'])
         y_chunk = next_chunk['status']
@@ -324,7 +331,7 @@ def trainer(data: pd.DataFrame, dataset_copy: pd.DataFrame) -> Tuple[
         
         previous_models = []
         for number in range(1, max_chunk):
-            previous_models.append(joblib.load(f"/path/to/models/model.chunk{number}.threshold.0.55.pkl"))
+            previous_models.append(joblib.load(f"{PATH_MODELS}/model.chunk{number}.threshold.0.55.pkl"))
             
         next_chunk = chunks[t + 1].drop(columns=['time_period'])
         next_chunk['status'] = next_chunk['status']
@@ -351,7 +358,7 @@ def trainer(data: pd.DataFrame, dataset_copy: pd.DataFrame) -> Tuple[
         threshold_vector.extend([0.55] * len(y_next))
         
         models.extend(model_collection)
-        models_names.append(f"/path/to/models/model.chunk{t}.threshold.0.55.pkl")
+        models_names.append(f"{PATH_MODELS}/model.chunk{t}.threshold.0.55.pkl")
         
     final_df = pd.DataFrame({
         'real': real,
@@ -362,7 +369,7 @@ def trainer(data: pd.DataFrame, dataset_copy: pd.DataFrame) -> Tuple[
         'threshold': threshold_vector,
         'chunk': chunk_vector
     })
-    final_df.to_pickle('/path/to/results/results.pkl')
+    final_df.to_pickle(f'{PATH_RESULTS}/results.pkl')
     return final_df, models_names, models, sample_df
 
 @step(enable_cache=False)
@@ -387,7 +394,7 @@ def evaluation(final_df: pd.DataFrame) -> Tuple[float, float]:
     balanced_acc_previous = chunk_metrics_previous['balanced_accuracy_previous'].mean()
  
     # Guardar métricas en archivo
-    with open("/path/to/results/total_metrics.txt", "w") as f:
+    with open(f"{PATH_RESULTS}/total_metrics.txt", "w") as f:
         f.write(f"Balanced Accuracy Promedio: {balanced_acc:.4f}\n")
         f.write("Primeros 5 valores reales\n")
         f.write(y_true.head().to_string())
@@ -423,7 +430,7 @@ def evaluation(final_df: pd.DataFrame) -> Tuple[float, float]:
         })
 
     chunk_metrics_df = pd.DataFrame(chunk_metrics_list).set_index("chunk")
-    chunk_metrics_df.to_pickle('/path/to/results/chunk_results.pkl')
+    chunk_metrics_df.to_pickle(f'{PATH_RESULTS}/chunk_results.pkl')
     
     # Crear gráfico de métricas
     sns.set(style="whitegrid", context="talk")
@@ -459,7 +466,7 @@ def evaluation(final_df: pd.DataFrame) -> Tuple[float, float]:
 
     plt.xticks(rotation=45)
     plt.tight_layout()
-    plt.savefig("/path/to/results/metrics_by_chunk.png", dpi=150)
+    plt.savefig(f"{PATH_RESULTS}/metrics_by_chunk.png", dpi=150)
 
     return balanced_acc, balanced_acc_previous
 
@@ -475,7 +482,7 @@ def save_model(balanced_accuracy: float, balanced_accuracy_previous: float,
     else: 
         for i in range(len(models_names)):
             joblib.dump(models[i], models_names[i]) 
-        sample_df.to_csv("/path/to/results/sample_predictions.csv", index=False)
+        sample_df.to_csv(f"{PATH_RESULTS}/sample_predictions.csv", index=False)
                                  
 
 @pipeline
