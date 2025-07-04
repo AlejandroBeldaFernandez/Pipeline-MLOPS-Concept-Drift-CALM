@@ -35,10 +35,6 @@ Our pipeline detects drift **implicitly** by evaluating performance monthly on n
 
 ### 2️⃣ Data Preprocessing
 
-- Removes nulls in key columns.
-- Generates binary variables (e.g., `OBESITY`, `ASTHMA`) from the `ETIQUETA` column.
-- Processes the diagnosis date to extract the month (`mes`) and segment the data into **monthly chunks**.
-- Converts categorical variables like `INGRESO` and `SEXO` to numeric format.
 
 ### 3️⃣ Training
 
@@ -50,8 +46,8 @@ Our pipeline detects drift **implicitly** by evaluating performance monthly on n
 
 ### 4️⃣ Validation
 
-- Calculates global and per-chunk metrics: *accuracy*, *precision*, *recall*, *f1*, and *balanced accuracy*.
-- Generates time series plots of balanced accuracy evolution and an accumulated confusion matrix.
+- Calculates global and per-chunk the metric *balanced accuracy*.
+- Generates time series plots of balanced accuracy evolution
 - Saves metrics and charts as monitoring evidence.
 
 ### 5️⃣ Model Deployment
