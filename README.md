@@ -1,6 +1,6 @@
 # 🦠 COVID-19 Predictive Pipeline with Concept Drift Adaptation
 
-Pipeline MLOps desarrollada con **ZenML** para entrenar y actualizar de forma continua un modelo predictivo sobre datos de pacientes con COVID. El objetivo es detectar y adaptarse automáticamente al **concept drift** en los datos de estratificación ofrecidos por SMS, asegurando un desempeño óptimo en el tiempo.
+Pipeline MLOps desarrollada con **ZenML** para entrenar y actualizar de forma continua un modelo predictivo sobre datos de pacientes con COVID. El objetivo es detectar y adaptarse automáticamente al **concept drift** en los datos de estratificación ofrecidos por el SMS, asegurando mantener modelos actualizados con excelente rendimiento en funcionamiento; además de notificando correctamente al equipo en caso de algún problema.
 
 ---
 
@@ -21,7 +21,7 @@ Nuestra pipeline detecta el drift de forma **implícita**, evaluando mensualment
    Si los datos cambian, la pipeline entrena ensembles actualizados con los datos más recientes, ajustando el modelo al nuevo patrón.
 
 3. **Automatización con CRON:**  
-   La ejecución automática mediante `crontab` garantiza un sistema continuo de aprendizaje y actualización.
+   La ejecución automática mediante `CRONTAB` garantiza un sistema continuo de aprendizaje y actualización.
 
 ---
 
