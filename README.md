@@ -58,7 +58,7 @@ Nuestra pipeline detecta el drift de forma **implícita**, evaluando mensualment
 
 - Compara el rendimiento del nuevo modelo con el anterior.
 - Solo guarda el nuevo modelo si:
-  - El rendimiento supera el umbral mínimo (balanced accuracy ≥ 0.9), **y**
+  - El rendimiento supera el umbral mínimo esperado-
   - El modelo mejora o mantiene el desempeño frente al modelo previo.
 - Guarda ejemplos de predicciones para auditoría y trazabilidad.
 
